@@ -62,7 +62,9 @@ func resourceAwsIamPolicyCreate(d *schema.ResourceData, meta interface{}) error 
 		return fmt.Errorf("Error creating IAM policy %s: %s", name, err)
 	}
 
-	return readIamPolicy(d, response.Policy)
+	response2, err := getAwsIamPolicyVersion(d, response.Policy, iamconn)
+
+	return readIamPolicy(d, response.Policy, response2.PolicyVersion)
 }
 
 func resourceAwsIamPolicyRead(d *schema.ResourceData, meta interface{}) error {
@@ -81,7 +83,24 @@ func resourceAwsIamPolicyRead(d *schema.ResourceData, meta interface{}) error {
 		return fmt.Errorf("Error reading IAM policy %s: %s", d.Id(), err)
 	}
 
-	return readIamPolicy(d, response.Policy)
+	response2, err := getAwsIamPolicyVersion(d, response.Policy, iamconn)
+
+	return readIamPolicy(d, response.Policy, response2.PolicyVersion)
+}
+
+func getAwsIamPolicyVersion(d *schema.ResourceData, policy *iam.Policy, iamconn *iam.IAM) (*iam.GetPolicyVersionOutput, error) {
+	defaultId := policy.DefaultVersionId
+
+	request := &iam.GetPolicyVersionInput{
+		PolicyArn: aws.String(d.Id()),
+		VersionId: defaultId,
+	}
+
+	response, err := iamconn.GetPolicyVersion(request)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading IAM policy %s version %s: %s", d.Id(), *defaultId, err)
+	}
+	return response, nil
 }
 
 func resourceAwsIamPolicyUpdate(d *schema.ResourceData, meta interface{}) error {
@@ -204,7 +223,7 @@ func iamPolicyListVersions(arn string, iamconn *iam.IAM) ([]*iam.PolicyVersion, 
 	return response.Versions, nil
 }
 
-func readIamPolicy(d *schema.ResourceData, policy *iam.Policy) error {
+func readIamPolicy(d *schema.ResourceData, policy *iam.Policy, policyVersion *iam.PolicyVersion) error {
 	d.SetId(*policy.Arn)
 	if policy.Description != nil {
 		// the description isn't present in the response to CreatePolicy.
@@ -221,7 +240,9 @@ func readIamPolicy(d *schema.ResourceData, policy *iam.Policy) error {
 	if err := d.Set("arn", *policy.Arn); err != nil {
 		return err
 	}
-	// TODO: set policy
+	if err := d.Set("policy", *policyVersion.Document); err != nil {
+		return err
+	}
 
 	return nil
 }
